@@ -2,20 +2,31 @@ import os
 import imutils
 from imutils import contours
 from skimage import measure
+from pathlib import Path
 import numpy as np
-from astropy import coordinates
 import math
 import argparse
 import cv2
 import json
 import datetime
 import logging
+import pprint
 
 # set logging
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
-logfile = "light_detector_{}.log".format(datetime.datetime.now().strftime("%Y%m%d"))
+
+# create formatter
+formatter = logging.Formatter("%(asctime)s;%(levelname)s;%(message)s",
+                              "%Y-%m-%d %H:%M:%S")
+
+logdir = os.path.join(Path.home(), "light_detector")
+if not os.path.isdir(logdir):
+    os.makedirs(logdir)
+logname = "light_detector_{}.log".format(datetime.datetime.now().strftime("%Y%m%d"))
+logfile = os.path.join(logdir, logname)
 output_file_handler = logging.FileHandler(logfile)
+output_file_handler.setFormatter(formatter)
 log.addHandler(output_file_handler)
 
 # construct the argument parse and parse the arguments
@@ -53,6 +64,11 @@ ap.add_argument("--visualout",
                 action='store_true',
                 default=False,
                 help="Output light detection visualization")
+
+ap.add_argument("--printlights",
+                action='store_true',
+                default=False,
+                help="Prints light info")
 
 ap.add_argument("--infillout",
                 action='store_true',
@@ -141,10 +157,11 @@ def detector(args):
 	"""
 	Main detector script
 	"""
+	log.info("Input Arguments: {}".format(str(args)))
 	# load the image, convert it to grayscale, and blur it
 	imagepath = args.image
 	if os.path.isfile(imagepath):
-		log.info("Detecting Lights In {}".format(imagepath))
+		log.info("Detecting Lights In: {}".format(imagepath))
 		image = cv2.imread(imagepath, cv2.IMREAD_UNCHANGED)
 		gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 		blurred = cv2.GaussianBlur(gray, (11, 11), 0)
@@ -262,8 +279,8 @@ def detector(args):
 		                            float(lightsdict['shape'][1]),
 		                            float(lightsdict['shape'][0]))
 
-		radianx, radiany = degrees_to_rads(degrees[0]), degrees_to_rads(degrees[1])
-		cartesian = coordinates.spherical_to_cartesian(1.0, radiany, radianx)
+		radianx, radiany = degrees_to_rads(degrees[0], degrees[1])
+		cartesian = polar2cart(1.0, radiany, radianx)
 		lightsdict['lights'][lightkey]['cartesian'] = float(cartesian[0]), \
 		                                              float(cartesian[1]), \
 		                                              float(cartesian[2])
@@ -329,6 +346,10 @@ def detector(args):
 			                                           "lights_visualized"))
 			cv2.imwrite(filename, image)
 			log.info("Infill Output: {}".format(filename))
+
+	# print lights info
+	if args.printlights:
+		pprint.pprint(lightsdict)
 
 	# output json of lights info
 	if args.json:
