@@ -29,63 +29,90 @@ output_file_handler = logging.FileHandler(logfile)
 output_file_handler.setFormatter(formatter)
 log.addHandler(output_file_handler)
 
-# construct the argument parse and parse the arguments
-ap = argparse.ArgumentParser()
+def build_parser():
+	"""
+	Build command-line argument parser.
+	:return: argparse.ArgumentParser
+	"""
+	ap = argparse.ArgumentParser()
 
-ap.add_argument("-i", "--image",
-                required=True,
-                help="Path to the input image file")
+	ap.add_argument("-i", "--image",
+	                required=True,
+	                help="Path to the input image file")
 
-ap.add_argument("--minthresh",
-                type=float,
-                default=1.0,
-                help="Min light threshold value")
+	ap.add_argument("--minthresh",
+	                type=float,
+	                default=1.0,
+	                help="Min light threshold value")
 
-ap.add_argument("--maxthresh",
-                type=float,
-                default=10000,
-                help="Max light threshold value")
+	ap.add_argument("--maxthresh",
+	                type=float,
+	                default=10000,
+	                help="Max light threshold value")
 
-ap.add_argument("--outpath",
-                type=str,
-                help="Directory output path to save files")
+	ap.add_argument("--outpath",
+	                type=str,
+	                help="Directory output path to save files")
 
-ap.add_argument("--json",
-                action='store_true',
-                default=False,
-                help="Output light info to json file")
+	ap.add_argument("--json",
+	                action='store_true',
+	                default=False,
+	                help="Output light info to json file")
 
-ap.add_argument("--visualize",
-                action='store_true',
-                default=False,
-                help="Visualize light detection")
+	ap.add_argument("--visualize",
+	                action='store_true',
+	                default=False,
+	                help="Visualize light detection")
 
-ap.add_argument("--visualout",
-                action='store_true',
-                default=False,
-                help="Output light detection visualization")
+	ap.add_argument("--visualout",
+	                action='store_true',
+	                default=False,
+	                help="Output light detection visualization")
 
-ap.add_argument("--printlights",
-                action='store_true',
-                default=False,
-                help="Prints light info")
+	ap.add_argument("--printlights",
+	                action='store_true',
+	                default=False,
+	                help="Prints light info")
 
-ap.add_argument("--infillout",
-                action='store_true',
-                default=False,
-                help="Output image with lights filled from surrounding pixels")
+	ap.add_argument("--infillout",
+	                action='store_true',
+	                default=False,
+	                help="Output image with lights filled from surrounding pixels")
 
-ap.add_argument("--maskout",
-                action='store_true',
-                default=False,
-                help="Output of light mask")
+	ap.add_argument("--maskout",
+	                action='store_true',
+	                default=False,
+	                help="Output of light mask")
 
-ap.add_argument("--iterations",
-                type=int,
-                default=8,
-                help="Iterations to apply for in-fill process")
+	ap.add_argument("--iterations",
+	                type=int,
+	                default=8,
+	                help="Iterations to apply for in-fill process")
 
-arguments = ap.parse_args()
+	return ap
+
+
+def validate_args(args):
+	"""
+	Validate parsed command-line arguments.
+	:param args: argparse.Namespace
+	:return: None
+	"""
+	if not os.path.isfile(args.image):
+		raise ValueError("Input image does not exist: {}".format(args.image))
+
+	requires_outpath = args.infillout or args.maskout or args.visualout or args.json
+	if requires_outpath and not args.outpath:
+		raise ValueError("--outpath is required when output flags are enabled")
+
+	if args.outpath and not os.path.isdir(args.outpath):
+		raise ValueError("Output path must be an existing directory: {}".format(args.outpath))
+
+	if args.iterations < 1:
+		raise ValueError("--iterations must be greater than or equal to 1")
+
+	if args.minthresh > args.maxthresh:
+		raise ValueError("--minthresh must be less than or equal to --maxthresh")
 
 
 def write_json(lightsdict, filepath):
@@ -160,12 +187,13 @@ def detector(args):
 	log.info("Input Arguments: {}".format(str(args)))
 	# load the image, convert it to grayscale, and blur it
 	imagepath = args.image
-	if os.path.isfile(imagepath):
-		log.info("Detecting Lights In: {}".format(imagepath))
-		image = cv2.imread(imagepath, cv2.IMREAD_UNCHANGED)
-		gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-		blurred = cv2.GaussianBlur(gray, (11, 11), 0)
-		log.info("Image Size: {}x{}".format(image.shape[1], image.shape[0]))
+	log.info("Detecting Lights In: {}".format(imagepath))
+	image = cv2.imread(imagepath, cv2.IMREAD_UNCHANGED)
+	if image is None:
+		raise ValueError("Unable to read image data from: {}".format(imagepath))
+	gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+	blurred = cv2.GaussianBlur(gray, (11, 11), 0)
+	log.info("Image Size: {}x{}".format(image.shape[1], image.shape[0]))
 
 	# copy image for imgfill and add full alpha
 	if args.infillout:
@@ -322,30 +350,27 @@ def detector(args):
 
 	# output infill image
 	if args.infillout:
-		if os.path.isdir(args.outpath):
-			filename = os.path.join(args.outpath,
-			                        "{}_{}.exr".format(os.path.splitext(os.path.basename(args.image))[0],
-			                                           "lights_infill"))
-			cv2.imwrite(filename, imgfill)
-			log.info("Infill Output: {}".format(filename))
+		filename = os.path.join(args.outpath,
+		                        "{}_{}.exr".format(os.path.splitext(os.path.basename(args.image))[0],
+		                                           "lights_infill"))
+		cv2.imwrite(filename, imgfill)
+		log.info("Infill Output: {}".format(filename))
 
 	# output lights mask as default
 	if args.maskout:
-		if os.path.isdir(args.outpath):
-			filename = os.path.join(args.outpath,
-			                        "{}_{}.png".format(os.path.splitext(os.path.basename(args.image))[0],
-			                                           "lights_mask"))
-			cv2.imwrite(filename, mask)
-			log.info("Mask Output: {}".format(filename))
+		filename = os.path.join(args.outpath,
+		                        "{}_{}.png".format(os.path.splitext(os.path.basename(args.image))[0],
+		                                           "lights_mask"))
+		cv2.imwrite(filename, mask)
+		log.info("Mask Output: {}".format(filename))
 
 	# output visualized image
 	if args.visualout:
-		if os.path.isdir(args.outpath):
-			filename = os.path.join(args.outpath,
-			                        "{}_{}.exr".format(os.path.splitext(os.path.basename(args.image))[0],
-			                                           "lights_visualized"))
-			cv2.imwrite(filename, image)
-			log.info("Infill Output: {}".format(filename))
+		filename = os.path.join(args.outpath,
+		                        "{}_{}.exr".format(os.path.splitext(os.path.basename(args.image))[0],
+		                                           "lights_visualized"))
+		cv2.imwrite(filename, image)
+		log.info("Infill Output: {}".format(filename))
 
 	# print lights info
 	if args.printlights:
@@ -353,13 +378,30 @@ def detector(args):
 
 	# output json of lights info
 	if args.json:
-		if os.path.isdir(args.outpath):
-			filename = os.path.join(args.outpath,
-			                        "{}_{}.json".format(os.path.splitext(os.path.basename(args.image))[0],
-			                                            "lights"))
-			write_json(lightsdict, filename)
-			log.info("Lights JSON Output: {}".format(filename))
+		filename = os.path.join(args.outpath,
+		                        "{}_{}.json".format(os.path.splitext(os.path.basename(args.image))[0],
+		                                            "lights"))
+		write_json(lightsdict, filename)
+		log.info("Lights JSON Output: {}".format(filename))
+
+
+def main(argv=None):
+	"""
+	CLI entrypoint.
+	:param argv: optional argument list
+	:return: process exit code
+	"""
+	parser = build_parser()
+	args = parser.parse_args(argv)
+	try:
+		validate_args(args)
+		detector(args)
+	except ValueError as error:
+		log.error(str(error))
+		return 1
+
+	return 0
 
 
 if __name__ == "__main__":
-	detector(arguments)
+	raise SystemExit(main())
